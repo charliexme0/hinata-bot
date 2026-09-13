@@ -1,7 +1,5 @@
-import time
 import os
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from threading import Thread
+import time
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters
 from google import genai
@@ -12,6 +10,12 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 MONGO_URI = os.environ.get("MONGO_URI")
 GAURAV_ID = 7034520081
 
+# Render ka assigned port
+PORT = int(os.environ.get("PORT", 10000))
+# Apni Render app ka URL yahan daalna (jaise https://hinata-bot-uyag.onrender.com)
+RENDER_URL = "https://hinata-bot-0yag.onrender.com"
+
+
 # MongoDB Connection
 db_client = MongoClient(MONGO_URI)
 db = db_client["hinata_bot"]
@@ -19,18 +23,6 @@ chats_collection = db["chat_history"]
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 last_entry_time = {}
-
-class SimpleHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"Hinata Bot with Memory is active 24/7!")
-
-def run_server():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), SimpleHandler)
-    server.serve_forever()
 
 # --- Commands ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -81,13 +73,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Nice try, par ye trick yahan nahi chalegi! 🚫 Gaurav ka rule final hai.")
         return
 
-    # Database se pichli chat history nikalein
     user_doc = chats_collection.find_one({"user_id": user_id})
     history = user_doc.get("history", []) if user_doc else []
 
-    # Naya message history mein jodo
     history.append(f"Gaurav: {user_message}" if user_id == GAURAV_ID else f"User: {user_message}")
-    if len(history) > 6:  # Sirf last 6 messages yaad rakhega taaki memory fast rahe
+    if len(history) > 6:
         history = history[-6:]
 
     if user_id == GAURAV_ID:
@@ -110,7 +100,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_text = response.text
             await update.message.reply_text(reply_text)
             
-            # Bot ka reply bhi history mein save karo
             history.append(f"Hinata: {reply_text}")
             chats_collection.update_one({"user_id": user_id}, {"$set": {"history": history}}, upsert=True)
         except Exception:
@@ -125,10 +114,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Net issue h shayad 🚶‍♂️")
 
 def main():
-    server_thread = Thread(target=run_server)
-    server_thread.daemon = True
-    server_thread.start()
-
     application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     
     application.add_handler(CommandHandler("start", start_command))
@@ -137,11 +122,17 @@ def main():
     application.add_handler(CommandHandler("morning_thoughts", morning_thoughts_command))
     application.add_handler(CommandHandler("daily_thoughts", daily_thoughts_command))
     application.add_handler(CommandHandler("quotes", quotes_command))
-    
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-    print("Hinata with MongoDB Memory ready... 🚀")
-    application.run_polling()
+    print("Hinata Webhook Server starting... 🚀")
+    
+    # Webhook configuration for Render Web Service
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        secret_token="super_secret_token_hinata",
+        webhook_url=f"{RENDER_URL}/{TELEGRAM_BOT_TOKEN}"
+    )
 
 if __name__ == '__main__':
     main()
